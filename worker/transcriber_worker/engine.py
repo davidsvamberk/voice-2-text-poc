@@ -98,6 +98,6 @@ class Engine:
             temperature=0.0, condition_on_previous_text=True, vad_filter=False,
             word_timestamps=True, initial_prompt=None)
         # Fully consume the lazy generator before committing a result or emitting done.
-        return [dict(start=s.start, end=s.end, text=s.text,
-                     words=[dict(start=w.start, end=w.end, text=w.word) for w in (s.words or [])])
+        return [dict(start=float(s.start), end=float(s.end), text=s.text,
+                     words=[dict(start=float(w.start), end=float(w.end), text=w.word) for w in (s.words or [])])
                 for s in segments]

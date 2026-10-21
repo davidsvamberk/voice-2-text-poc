@@ -117,6 +117,44 @@ class WorkerTest(unittest.TestCase):
         self.assertEqual('1', os.environ['HF_HUB_OFFLINE'])
         self.assertEqual('1', os.environ['HF_HUB_DISABLE_TELEMETRY'])
 
+    def test_scalar_timestamps_commit_through_run_request(self):
+        class Scalar:
+            def __init__(self, value): self.value = value
+            def __float__(self): return float(self.value)
+
+        segment = NS(start=Scalar(0.25), end=Scalar(1.75), text='česky',
+                     words=[NS(start=Scalar(0.5), end=Scalar(1.5), word='česky')])
+        class Model:
+            def __init__(self, *args, **kwargs): pass
+            def transcribe(self, audio, **kwargs): return iter([segment]), None
+
+        self.request['pendingBlockIds'] = [0]
+        with patch.dict(sys.modules, {'faster_whisper': NS(WhisperModel=Model)}), \
+             patch('transcriber_worker.engine.read_block', return_value='samples'):
+            self.assertEqual(0, run_request(self.request, Engine, self.events.append))
+            self.assertEqual(['ready', 'progress', 'block_done'], [e['type'] for e in self.events])
+            path = Path(self.request['workDir']) / 'blocks/000000.json'
+            saved = json.loads(path.read_text())['segments'][0]
+            self.assertEqual(dict(start=0.25, end=1.75, text='česky',
+                words=[dict(start=0.5, end=1.5, text='česky')]), saved)
+            for item in (saved, saved['words'][0]):
+                self.assertIs(type(item['start']), float)
+                self.assertIs(type(item['end']), float)
+
+            # Normalization must preserve the protocol's finite/range checks.
+            for target in (segment, segment.words[0]):
+                for field in ('start', 'end'):
+                    original = getattr(target, field)
+                    for value in (float('nan'), float('inf'), -0.25, 2.25):
+                        with self.subTest(word=target is segment.words[0], field=field, value=value):
+                            path.unlink(missing_ok=True)
+                            self.events.clear()
+                            setattr(target, field, Scalar(value))
+                            self.assertEqual(1, run_request(self.request, Engine, self.events.append))
+                            self.assertEqual(['ready', 'error'], [e['type'] for e in self.events])
+                            self.assertFalse(path.exists())
+                    setattr(target, field, original)
+
     def test_rejects_coercions_unknown_versions_and_duplicate_ids(self):
         for path, value in [('schemaVersion',True), ('schemaVersion',2), ('pendingBlockIds',[0,0]),
                             ('pendingBlockIds',['0']), ('pendingBlockIds',[2])]:
