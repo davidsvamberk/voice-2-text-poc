@@ -7,15 +7,19 @@ import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static java.nio.file.LinkOption.NOFOLLOW_LINKS;
 import static java.nio.file.StandardOpenOption.CREATE;
 import static java.nio.file.StandardOpenOption.WRITE;
 
 public final class Workspace implements AutoCloseable {
+    private static final Set<Path> OPEN_PATHS = ConcurrentHashMap.newKeySet();
     private final Path path;
     private final FileChannel channel;
     private final FileLock lock;
+    private boolean closed;
 
     private Workspace(Path path, FileChannel channel, FileLock lock) {
         this.path = path;
@@ -27,8 +31,12 @@ public final class Workspace implements AutoCloseable {
         Path path = requested.isPresent() ? requested.get().toAbsolutePath().normalize()
                 : Files.createTempDirectory("transcriber-").toAbsolutePath();
         Files.createDirectories(path);
-        var channel = FileChannel.open(path.resolve(".lock"), CREATE, WRITE, NOFOLLOW_LINKS);
+        path = path.toRealPath();
+        // Closing any second descriptor can release the process's existing POSIX lock.
+        if (!OPEN_PATHS.add(path)) throw new IOException("Workspace is already locked: " + path);
+        FileChannel channel = null;
         try {
+            channel = FileChannel.open(path.resolve(".lock"), CREATE, WRITE, NOFOLLOW_LINKS);
             FileLock lock;
             try {
                 lock = channel.tryLock();
@@ -45,7 +53,10 @@ public final class Workspace implements AutoCloseable {
             }
             return new Workspace(path, channel, lock);
         } catch (IOException | RuntimeException e) {
-            try { channel.close(); } catch (IOException close) { e.addSuppressed(close); }
+            if (channel != null) {
+                try { channel.close(); } catch (IOException close) { e.addSuppressed(close); }
+            }
+            OPEN_PATHS.remove(path);
             throw e;
         }
     }
@@ -53,11 +64,17 @@ public final class Workspace implements AutoCloseable {
     public Path path() { return path; }
 
     @Override
-    public void close() throws IOException {
+    public synchronized void close() throws IOException {
+        if (closed) return;
         try {
             if (lock.isValid()) lock.release();
         } finally {
-            channel.close();
+            try {
+                channel.close();
+            } finally {
+                closed = true;
+                OPEN_PATHS.remove(path);
+            }
         }
     }
 }

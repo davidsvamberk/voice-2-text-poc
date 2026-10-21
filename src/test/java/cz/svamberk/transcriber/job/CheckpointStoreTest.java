@@ -175,6 +175,70 @@ class CheckpointStoreTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"0.9", "\"0\"", "false"})
+    void malformedIdsRemainPending(String id) throws Exception {
+        try (var workspace = workspace()) {
+            var store = store(workspace);
+            audio(workspace);
+            store.savePlan(plan);
+            Path file = workspace.path().resolve("blocks/000000.json");
+            Files.createDirectories(file.getParent());
+            String json = mapper.writeValueAsString(result(List.of())).replace("\"blockId\":0", "\"blockId\":" + id);
+            Files.writeString(file, json);
+            boolean blockPending = store.loadValidBlock(block, manifest).isEmpty();
+            Files.writeString(workspace.path().resolve("plan.json"),
+                    "{\"schemaVersion\":1,\"duration\":10,\"blocks\":[{\"id\":" + id + ",\"start\":0,\"end\":10}]}");
+            assertAll(() -> assertTrue(blockPending, "Invalid blockId: " + id),
+                    () -> assertTrue(store.loadPlan().isEmpty(), "Invalid plan ID: " + id));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"1.9", "\"1\"", "true"})
+    void malformedSchemasAreNeverAccepted(String version) throws Exception {
+        try (var workspace = workspace()) {
+            var store = store(workspace);
+            audio(workspace);
+            store.savePlan(plan);
+            Path file = workspace.path().resolve("blocks/000000.json");
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, mapper.writeValueAsString(result(List.of()))
+                    .replace("\"schemaVersion\":1", "\"schemaVersion\":" + version));
+            assertTrue(store.loadValidBlock(block, manifest).isEmpty());
+            Files.writeString(workspace.path().resolve("plan.json"), mapper.writeValueAsString(plan)
+                    .replace("\"schemaVersion\":1", "\"schemaVersion\":" + version));
+            assertTrue(store.loadPlan().isEmpty());
+            Files.writeString(workspace.path().resolve("manifest.json"), mapper.writeValueAsString(manifest)
+                    .replace("\"schemaVersion\":1", "\"schemaVersion\":" + version));
+            assertThrows(IOException.class, () -> store.initializeOrValidate(workspace, manifest));
+        }
+    }
+
+    @Test
+    void rejectsScalarCoercionAtCheckpointBoundary() throws Exception {
+        try (var workspace = workspace()) {
+            var store = store(workspace);
+            audio(workspace);
+            store.savePlan(plan);
+            store.saveBlock(result(List.of(new Segment(0, 10, "text", List.of()))));
+            Path file = workspace.path().resolve("blocks/000000.json");
+            String valid = Files.readString(file);
+            for (String malformed : List.of(valid.replace("\"start\":0.0", "\"start\":\"0\""),
+                    valid.replace("\"text\":\"text\"", "\"text\":true"),
+                    valid.replace("\"text\":\"text\"", "\"text\":123"))) {
+                Files.writeString(file, malformed);
+                assertTrue(store.loadValidBlock(block, manifest).isEmpty(), malformed);
+            }
+            String validManifest = Files.readString(workspace.path().resolve("manifest.json"));
+            for (String replacement : List.of("\"true\"", "1")) {
+                Files.writeString(workspace.path().resolve("manifest.json"), validManifest
+                        .replace("\"wordTimestamps\":true", "\"wordTimestamps\":" + replacement));
+                assertThrows(IOException.class, () -> store.initializeOrValidate(workspace, manifest));
+            }
+        }
+    }
+
     @Test
     void validatesIdentityIdsSegmentsAndWords() throws Exception {
         try (var workspace = workspace()) {

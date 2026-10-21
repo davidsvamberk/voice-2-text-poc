@@ -5,6 +5,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.cfg.CoercionAction;
+import tools.jackson.databind.cfg.CoercionInputShape;
+import tools.jackson.databind.type.LogicalType;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -24,7 +28,14 @@ public final class CheckpointStore {
 
     public CheckpointStore(Workspace workspace, ObjectMapper mapper) {
         this.workspace = workspace;
-        this.mapper = mapper;
+        this.mapper = mapper.rebuild()
+                .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+                .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+                .withCoercionConfig(LogicalType.Textual, coercion -> coercion
+                        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
+                .build();
         this.files = new AtomicJsonFiles(mapper);
     }
 
