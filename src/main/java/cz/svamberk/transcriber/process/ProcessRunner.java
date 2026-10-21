@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
@@ -54,10 +55,22 @@ public class ProcessRunner {
         }
     }
 
-    /** Terminates descendants before their parent so the parent can reap them. Shared with streaming supervisors. */
+    /**
+     * Best-effort cleanup shared with streaming supervisors: request root termination before waiting.
+     * Retain discovered handles and rescan around that request. Java descendant snapshots cannot
+     * atomically prevent spawning or rediscover children reparented before a scan; no tree-wide
+     * termination guarantee is possible here. Prompt root termination limits that race for our
+     * controlled FFmpeg/Python commands, at the cost of relying on the OS to reap orphaned children.
+     */
     public void terminate(Process process) {
         boolean interrupted = Thread.interrupted();
-        var descendants = process.descendants().toList();
+        var descendants = new LinkedHashSet<>(process.descendants().toList());
+        descendants.forEach(ProcessHandle::destroyForcibly);
+        // Capture any new children while the root is still available, without waiting for exits.
+        descendants.addAll(process.descendants().toList());
+        process.destroyForcibly();
+        // A forcible termination request need not take effect immediately.
+        descendants.addAll(process.descendants().toList());
         descendants.forEach(ProcessHandle::destroyForcibly);
         try {
             for (var child : descendants) {

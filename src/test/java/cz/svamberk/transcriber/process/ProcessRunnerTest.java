@@ -9,6 +9,9 @@ import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 class ProcessRunnerTest {
     @TempDir Path temp;
@@ -52,6 +55,27 @@ class ProcessRunnerTest {
             for (var child : children) assertFalse(child.isAlive());
         } finally { process.descendants().forEach(ProcessHandle::destroyForcibly); process.destroyForcibly(); thread.interrupt(); }
     }
+    @Test void stopsRootBeforeWaitingAndRetainsRescannedDescendants() {
+        // A changing process tree is simulated at the OS boundary, without a timing-dependent spawn race.
+        var root = mock(Process.class);
+        var known = mock(ProcessHandle.class);
+        var late = mock(ProcessHandle.class);
+        var scans = new AtomicInteger();
+        when(root.descendants()).thenAnswer(call -> scans.getAndIncrement() == 0
+                ? Stream.of(known) : Stream.of(late));
+        when(known.onExit()).thenReturn(CompletableFuture.completedFuture(known));
+        when(late.onExit()).thenReturn(CompletableFuture.completedFuture(late));
+
+        new ProcessRunner().terminate(root);
+
+        var order = inOrder(root, known, late);
+        order.verify(root).destroyForcibly();
+        order.verify(known).onExit();
+        order.verify(late).onExit();
+        verify(known, atLeastOnce()).destroyForcibly();
+        verify(late, atLeastOnce()).destroyForcibly();
+    }
+
     public static class Child {
         public static void main(String[] args) throws Exception {
             switch (args[0]) {
