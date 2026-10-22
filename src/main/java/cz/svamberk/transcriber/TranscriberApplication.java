@@ -3,6 +3,8 @@ package cz.svamberk.transcriber;
 import cz.svamberk.transcriber.cli.CliArguments;
 import cz.svamberk.transcriber.cli.TranscriberCommand;
 import cz.svamberk.transcriber.config.RuntimeSettings;
+import cz.svamberk.transcriber.job.TranscriptionJob;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -37,7 +39,7 @@ public class TranscriberApplication {
     }
 
     @Bean
-    TranscriberCommand transcriberCommand() {
-        return new TranscriberCommand();
+    TranscriberCommand transcriberCommand(ObjectMapper mapper, RuntimeSettings settings) {
+        return new TranscriberCommand(System.out, System.err, new TranscriptionJob(mapper), settings);
     }
 }

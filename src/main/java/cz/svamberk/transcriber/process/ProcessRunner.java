@@ -15,11 +15,21 @@ import java.util.concurrent.TimeoutException;
 /** Shell-free processes; subclass or inject this runner at external-process boundaries. */
 public class ProcessRunner {
     private static final int MAX_STDOUT = 8 * 1024 * 1024;
+    private final ProcessSupervisor supervisor;
+
+    public ProcessRunner() { this(new ProcessSupervisor()); }
+
+    public ProcessRunner(ProcessSupervisor supervisor) { this.supervisor = supervisor; }
+
+    public ProcessSupervisor supervisor() { return supervisor; }
 
     /** Starts a process with stderr streamed directly to disk; caller owns its lifecycle and stdout/stdin. */
     public Process start(List<String> command, Path stderrLog) throws IOException {
         Files.createDirectories(stderrLog.toAbsolutePath().getParent());
-        return new ProcessBuilder(List.copyOf(command)).redirectError(stderrLog.toFile()).start();
+        if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Process launch interrupted");
+        Process process = new ProcessBuilder(List.copyOf(command)).redirectError(stderrLog.toFile()).start();
+        supervisor.register(process, this);
+        return process;
     }
 
     public ProcessResult run(List<String> command, Path stderrLog) throws IOException, InterruptedException {

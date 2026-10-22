@@ -72,8 +72,7 @@ class CliArgumentsTest {
         assertTrue(errors.toString(StandardCharsets.UTF_8).contains("INPUT"));
         assertEquals(2, command.execute(new String[]{"--unknown"}));
         output.reset();
-        assertEquals(0, command.execute(new String[]{"přednáška 1.mp3"}));
-        assertTrue(output.toString(StandardCharsets.UTF_8).contains("přednáška 1.mp3"));
+        assertEquals(1, command.execute(new String[]{"přednáška 1.mp3"}));
     }
 
     @Test

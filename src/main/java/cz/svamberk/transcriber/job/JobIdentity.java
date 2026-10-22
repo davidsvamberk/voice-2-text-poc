@@ -36,6 +36,15 @@ public final class JobIdentity {
         // Explicit effective fields: model location is persisted only as metadata.
         var fields = new TreeMap<String, Object>();
         fields.put("modelSha256", config.modelSha256());
+        fields.put("task", "transcribe");
+        fields.put("initialPrompt", null);
+        fields.put("audioStream", "0:a:0");
+        fields.put("audioCodec", "pcm_s16le");
+        fields.put("audioChannels", 1);
+        fields.put("audioSampleRate", 16000);
+        fields.put("audioContainer", "wav/rf64-auto");
+        fields.put("silenceNoiseDb", -35);
+        fields.put("silenceDurationSeconds", 0.5);
         fields.put("device", config.device());
         fields.put("computeType", config.computeType());
         fields.put("language", config.language());

@@ -38,7 +38,10 @@ public final class WorkerClient {
     }
 
     public Map<String,String> probe(RuntimeSettings runtime) throws IOException, InterruptedException {
-        Path log = Files.createTempFile("transcriber-probe-", ".log");
+        return probe(runtime, Files.createTempFile("transcriber-probe-", ".log"));
+    }
+
+    public Map<String,String> probe(RuntimeSettings runtime, Path log) throws IOException, InterruptedException {
         var result = runner.run(command(runtime, "--probe", "--model-dir", absolute(runtime.modelDir())), log);
         require(result.exitCode() == 0, "Worker probe failed; stderr: " + log);
         var node = object(result.stdout());

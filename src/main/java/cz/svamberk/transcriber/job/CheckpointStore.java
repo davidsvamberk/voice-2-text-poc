@@ -39,6 +39,15 @@ public final class CheckpointStore {
         this.files = new AtomicJsonFiles(mapper);
     }
 
+    /** Read the original identity without initializing or rewriting it. */
+    public Optional<JobManifest> loadManifest() throws IOException {
+        Path path = workspace.path().resolve("manifest.json");
+        if (!Files.exists(path, NOFOLLOW_LINKS)) return Optional.empty();
+        var stored = read(path, JobManifest.class);
+        validateManifest(stored);
+        return Optional.of(stored);
+    }
+
     public void initializeOrValidate(Workspace workspace, JobManifest expected) throws IOException {
         require(this.workspace == workspace, "Wrong workspace");
         validateManifest(expected);
@@ -62,12 +71,24 @@ public final class CheckpointStore {
     }
 
     public Optional<BlockPlan> loadPlan() throws IOException {
+        var plan = loadSavedPlan();
+        if (plan.isEmpty()) return plan;
+        try {
+            requireAudio();
+            return plan;
+        } catch (IOException e) {
+            pending(workspace.path().resolve("audio.wav"), e);
+            return Optional.empty();
+        }
+    }
+
+    /** Plan/result validation for reassembly also works when prepared audio needs recovery. */
+    public Optional<BlockPlan> loadSavedPlan() throws IOException {
         Path path = workspace.path().resolve("plan.json");
         if (!Files.exists(path, NOFOLLOW_LINKS)) return Optional.empty();
         try {
             var plan = read(path, BlockPlan.class);
             validatePlan(plan);
-            requireAudio();
             return Optional.of(plan);
         } catch (UnsupportedSchemaException e) {
             throw e;
@@ -88,8 +109,15 @@ public final class CheckpointStore {
     }
 
     public Optional<BlockResult> loadValidBlock(Block block, JobManifest expected) throws IOException {
+        return loadValidBlock(block, expected, loadPlan());
+    }
+
+    public Optional<BlockResult> loadSavedBlock(Block block, JobManifest expected) throws IOException {
+        return loadValidBlock(block, expected, loadSavedPlan());
+    }
+
+    private Optional<BlockResult> loadValidBlock(Block block, JobManifest expected, Optional<BlockPlan> plan) throws IOException {
         requireInitialized();
-        var plan = loadPlan();
         if (plan.isEmpty() || !plan.get().blocks().contains(block)) return Optional.empty();
         Path path = blockPath(block.id());
         if (!Files.exists(path, NOFOLLOW_LINKS)) return Optional.empty();
