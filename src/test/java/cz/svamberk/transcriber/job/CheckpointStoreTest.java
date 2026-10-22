@@ -84,6 +84,21 @@ class CheckpointStoreTest {
     }
 
     @Test
+    void rejectsManifestPreparedWithCollapsedTimeline() throws Exception {
+        // Fingerprint produced by d176594 for the fixed input/model/config fixture above.
+        var legacy = new JobManifest(1, manifest.inputSha256(), manifest.config(),
+                "1bc502c3cebbfcf57649660ebe01d2a9cd78d9a3ab440dab02ec966e158661bd");
+        try (var workspace = workspace()) {
+            Path path = workspace.path().resolve("manifest.json");
+            new AtomicJsonFiles(mapper).write(path, legacy);
+            byte[] original = Files.readAllBytes(path);
+            var store = new CheckpointStore(workspace, mapper);
+            assertThrows(IOException.class, () -> store.initializeOrValidate(workspace, manifest));
+            assertArrayEquals(original, Files.readAllBytes(path));
+        }
+    }
+
+    @Test
     void rejectsChangedInputOrConfig() throws Exception {
         try (var workspace = workspace()) {
             var store = store(workspace);

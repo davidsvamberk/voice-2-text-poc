@@ -1,6 +1,7 @@
 package cz.svamberk.transcriber.job;
 
 import tools.jackson.databind.json.JsonMapper;
+import cz.svamberk.transcriber.audio.AudioPreparer;
 
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -43,6 +44,9 @@ public final class JobIdentity {
         fields.put("audioChannels", 1);
         fields.put("audioSampleRate", 16000);
         fields.put("audioContainer", "wav/rf64-auto");
+        fields.put("audioCopyTimestamps", true);
+        fields.put("audioStartAtZero", true);
+        fields.put("audioResampleFilter", AudioPreparer.TIMELINE_FILTER);
         fields.put("silenceNoiseDb", -35);
         fields.put("silenceDurationSeconds", 0.5);
         fields.put("device", config.device());

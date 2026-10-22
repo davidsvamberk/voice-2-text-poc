@@ -14,6 +14,8 @@ python3 -m unittest discover -s worker/tests -v
 
 Cestu k JDK přizpůsobte své instalaci. Maven spouštějte přes wrapper. Testy používají syntetická data a falešný worker, nevyžadují CUDA ani model; procesové testy potřebují `/usr/bin/python3`. Při prvním buildu může být nutný internet pro Maven závislosti.
 
+Volitelné testy časové osy použijí skutečný FFmpeg z `PATH`; pokud není dostupný, přeskočí se pouze tyto scénáře. Vlastní binární soubor lze zvolit přes `./mvnw -Dtranscriber.test.ffmpeg=/cesta/ffmpeg -Dtest=AudioPreparerTest test`. Testují krátká bezeztrátová média a porovnávají připravené PCM včetně ticha; pro čtení délky WAV nahrazují pouze ffprobe pomocí JDK. Základní testy s falešným runnerem běží vždy.
+
 Distribuce obsahuje `target/transcriber.jar`, celý adresář `worker/`, samostatný Python venv a lokální model. JAR Python, jeho knihovny ani model nezabaluje. Nahrávky, modely a venv necommitujte.
 
 ## Python a CUDA — jednorázová příprava
@@ -87,6 +89,10 @@ java -jar target/transcriber.jar "/data/přednáška 1.mp3" --work-dir "./rozpra
 Bez `--work-dir` vznikne systémový dočasný adresář; jeho absolutní cestu aplikace vypíše. Sama jej nemaže, ale operační systém může dočasné adresáře později uklidit. Pro trvalé uchování zvolte vlastní adresář. Vstup a model musejí být mimo workspace; model a workspace se nesmějí vnořovat. Workspace odmítá symlinky a soubory odkazující na originální vstup. Originál se nepřepisuje ani nemaže.
 
 Pevná konfigurace: první audio stream, mono PCM s16le 16 kHz, WAV/RF64 podle velikosti, bez odšumování; orientačně 600s bloky, hledání pauz ±30 s (`silencedetect` −35 dB, 0,5 s), překryv 2 s. ASR: `cuda`, `float16`, `language=cs`, `task=transcribe`, `beam_size=5`, `temperature=0.0`, `condition_on_previous_text=true`, `vad_filter=false`, `word_timestamps=true`, bez initial promptu. Konfigurace a verze inference knihoven tvoří identitu úlohy.
+
+Časy přepisu odpovídají přehrávání originálu: nula je začátek kontejneru (`format.start_time`), nikoli první audio vzorek ani absolutní čas uložených PTS. Příprava použije `-copyts -start_at_zero` a `aresample=16000:async=1:first_pts=0:min_comp=0:min_hard_comp=0`. Pozdější začátek audia i mezery mezi audio rámci vyplní tichem, záporné vzorky před počátkem ořízne. `async=1` dovoluje pouze doplnění/ořez, bez změny rychlosti řeči; nulové prahy zachovají i krátké mezery. Viz [FFmpeg časové volby](https://ffmpeg.org/ffmpeg.html#Advanced-options) a [resampler](https://ffmpeg.org/ffmpeg-resampler.html#Resampler-Options). Vazba vychází z časových značek vstupu; ztracené nebo chybné značky nedokáže obnovit.
+
+Tyto volby jsou součástí hashe konfigurace. Workspace vytvořený starší přípravou, která mezery zkracovala, se odmítne i při dokončených blocích; pro novou přípravu použijte nový prázdný workspace.
 
 ## Přerušení, chyba a obnovení
 

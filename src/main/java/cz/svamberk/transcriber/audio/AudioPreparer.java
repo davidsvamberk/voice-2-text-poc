@@ -14,6 +14,9 @@ import static java.nio.file.StandardCopyOption.ATOMIC_MOVE;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 
 public final class AudioPreparer {
+    // Fill/trim timestamp discontinuities, including sub-100ms gaps, without stretching speech.
+    public static final String TIMELINE_FILTER =
+            "aresample=16000:async=1:first_pts=0:min_comp=0:min_hard_comp=0";
     private static final Pattern SILENCE = Pattern.compile("silence_(start|end):\\s*([0-9.eE+\\-]+)");
     private final ProcessRunner runner;
     private final String ffmpeg;
@@ -32,8 +35,9 @@ public final class AudioPreparer {
         checked(List.of(ffprobe, "-version"), logs.resolve("ffprobe-version.log"));
         Path temporary = ws.path().resolve("audio.wav.tmp");
         Path audio = ws.path().resolve("audio.wav");
-        checked(List.of(ffmpeg, "-nostdin", "-y", "-i", input.toString(), "-map", "0:a:0", "-vn",
-                "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "-rf64", "auto", "-f", "wav",
+        // WAV sample zero is the input format's playback start, not the first audio frame.
+        checked(List.of(ffmpeg, "-nostdin", "-y", "-copyts", "-start_at_zero", "-i", input.toString(), "-map", "0:a:0", "-vn",
+                "-ac", "1", "-ar", "16000", "-af", TIMELINE_FILTER, "-c:a", "pcm_s16le", "-rf64", "auto", "-f", "wav",
                 temporary.toString()), logs.resolve("prepare.log"));
         if (!Files.isRegularFile(temporary) || Files.size(temporary) == 0) {
             throw new IOException("FFmpeg produced no audio: " + temporary);
