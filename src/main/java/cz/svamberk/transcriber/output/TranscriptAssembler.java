@@ -44,6 +44,8 @@ public final class TranscriptAssembler {
                 var rightSegments = byBlock.get(right.id());
                 var leftWords = overlapWords(leftSegments, start, end);
                 var rightWords = overlapWords(rightSegments, start, end);
+                boolean leftSpeech = hasSpeech(leftSegments, start, end);
+                boolean rightSpeech = hasSpeech(rightSegments, start, end);
                 int matched = matchingLength(leftWords, rightWords);
                 for (int k = 0; k < matched; k++) {
                     var retained = leftWords.get(leftWords.size() - matched + k);
@@ -53,8 +55,6 @@ public final class TranscriptAssembler {
                 }
                 boolean wordless = hasWordlessSpeech(leftSegments, start, end)
                         || hasWordlessSpeech(rightSegments, start, end);
-                boolean leftSpeech = !leftWords.isEmpty() || hasWordlessSpeech(leftSegments, start, end);
-                boolean rightSpeech = !rightWords.isEmpty() || hasWordlessSpeech(rightSegments, start, end);
                 if (leftSpeech && rightSpeech && (matched == 0 || wordless)) {
                     warnings.add(new MergeWarning(left.id(), right.id(), "AMBIGUOUS_OVERLAP"));
                 }
@@ -70,6 +70,11 @@ public final class TranscriptAssembler {
     private static List<OutputWord> overlapWords(List<OutputSegment> segments, double start, double end) {
         return segments.stream().flatMap(s -> s.words.stream())
                 .filter(w -> !w.removed && w.midpoint() >= start && w.midpoint() <= end).toList();
+    }
+
+    private static boolean hasSpeech(List<OutputSegment> segments, double start, double end) {
+        return hasWordlessSpeech(segments, start, end) || segments.stream().flatMap(s -> s.words.stream())
+                .anyMatch(w -> !w.removed && !w.text.isBlank() && w.start < end && w.end > start);
     }
 
     private static boolean hasWordlessSpeech(List<OutputSegment> segments, double start, double end) {

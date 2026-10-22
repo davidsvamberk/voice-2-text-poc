@@ -68,6 +68,17 @@ class TranscriptAssemblerTest {
     }
 
     @Test
+    void warnsForIntersectingSpeechWithMidpointOutsideOverlap() {
+        for (String rightText : List.of(" druhý", " první")) {
+            var transcript = assemble(segment(" první", new Word(598.6, 599.2, " první")),
+                    segment(rightText, new Word(0, .2, rightText)));
+            assertEquals(List.of(" první", rightText),
+                    transcript.segments().stream().map(TranscriptSegment::text).toList());
+            assertEquals(List.of(new MergeWarning(0, 1, "AMBIGUOUS_OVERLAP")), transcript.warnings());
+        }
+    }
+
+    @Test
     void singleWordRequiresExactTextAndHalfOfShorterInterval() {
         var left = segment(" Ano!", new Word(599.2, 599.6, " Ano!"));
         var exact = assemble(left, segment(" Ano!", new Word(.4, .8, " Ano!")));
