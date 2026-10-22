@@ -2,6 +2,8 @@
 
 Java CLI připraví audio přes FFmpeg, spustí jeden lokální Python ASR worker a průběžně ukládá výsledky jednotlivých bloků. Dokončené bloky při obnově znovu nerozpoznává. Samotný přepis ani sestavení výstupů nic nestahují.
 
+Pro pokračování po čistém klonu viz [předání na desktop a první skutečný přepis](docs/desktop-handoff.md).
+
 ## Prostředí a build
 
 Potřebujete Linux x86_64, JDK 25, CPython 3.12, systémové `ffmpeg` a `ffprobe`. Python lock je určen pro Linux x86_64 s glibc alespoň 2.28; není přenositelný na jiné platformy. Všechny příkazy spouštějte z kořene projektu.
