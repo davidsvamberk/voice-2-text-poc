@@ -21,7 +21,8 @@ class TranscriptAssemblerTest {
     }
 
     static BlockResult result(int id, Segment... segments) {
-        return new BlockResult(1, "input-hash", "config-hash", id, List.of(segments));
+        return new BlockResult(1, "input-hash", "config-hash", id,
+                id == 0 ? 0 : 599, id == 0 ? 601 : 1200, List.of(segments));
     }
 
     Transcript assemble(Segment left, Segment right) {

@@ -7,6 +7,9 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.*;
@@ -27,6 +30,7 @@ class TranscriptionJobTest {
     String mode = "valid", version = "1";
     int probes, preparations, workers;
     boolean forbidProcesses;
+    boolean failProbe;
     final AtomicReference<Process> child = new AtomicReference<>();
 
     @BeforeEach void setup() throws Exception {
@@ -51,10 +55,15 @@ class TranscriptionJobTest {
                         Path(r['workDir'], 'waiting').write_text(str(os.getpid()))
                         time.sleep(60)
                     segments = [] if mode == 'empty' else [dict(start=0, end=1, text='Ahoj.', words=[])]
+                    if mode == 'ambiguous':
+                        segments = [dict(start=599.2 if i == 0 else 0.2,
+                            end=599.8 if i == 0 else 0.8, text=f'text-{i}', words=[])]
                     p = Path(r['workDir'], 'blocks', f'{i:06d}.json')
                     p.parent.mkdir(exist_ok=True)
                     p.write_text(json.dumps(dict(schemaVersion=1, inputSha256=r['inputSha256'],
-                        configSha256=r['configSha256'], blockId=i, segments=segments)))
+                        configSha256=r['configSha256'], blockId=i,
+                        blockStart=r['plan']['blocks'][i]['start'], blockEnd=r['plan']['blocks'][i]['end'],
+                        segments=segments)))
                     emit(type='block_done', blockId=i)
                 """);
         settings = new RuntimeSettings(Path.of("missing-python"), Path.of("missing-worker"), model,
@@ -68,6 +77,7 @@ class TranscriptionJobTest {
             Files.writeString(log, "");
             if (command.contains("--probe")) {
                 probes++;
+                if (failProbe) throw new IOException("Probe unavailable");
                 return new ProcessResult(0, "{\"schemaVersion\":1,\"engineVersions\":{\"fake\":\""+version+"\"}}");
             }
             if (command.contains("pcm_s16le")) {
@@ -108,6 +118,70 @@ class TranscriptionJobTest {
         assertTrue(Files.size(work.resolve("logs/java.log")) > 0);
         assertEquals(1, probes);
         assertEquals(1, workers);
+    }
+
+    @Test void successfulCommandDoesNotSuggestResuming() throws Exception {
+        var out = new ByteArrayOutputStream();
+        var err = new ByteArrayOutputStream();
+        var command = new TranscriberCommand(new PrintStream(out), new PrintStream(err), job(), settings);
+        assertEquals(0, command.execute(new String[]{input.toString(), "--work-dir", work.toString()}));
+        assertTrue(out.toString().contains("Saved transcript.txt"));
+        assertEquals("", err.toString());
+    }
+
+    @Test void retriesFailedPreflightInSameWorkspace() throws Exception {
+        failProbe = true;
+        assertThrows(IOException.class, this::run);
+        assertFalse(Files.exists(work.resolve("manifest.json")));
+        failProbe = false;
+        assertEquals(work.toAbsolutePath(), run());
+        assertEquals(1, workers);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void reportsAmbiguousOverlapsWithoutChangingTranscriptText(CapturedOutput output) throws Exception {
+        mode = "ambiguous";
+        run();
+        assertEquals("text-0\ntext-1\n", Files.readString(work.resolve("transcript.txt")));
+        assertTrue(output.getErr().contains("Ambiguous overlaps: 1"));
+    }
+
+    @Test void shutdownDoesNotWaitForOwnerSystemExit() throws Exception {
+        Path root = Files.createDirectory(temp.resolve("shutdown-job"));
+        Path log = temp.resolve("shutdown.log");
+        var process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", System.getProperty("java.class.path"), ShutdownProbe.class.getName(), root.toString())
+                .redirectErrorStream(true).redirectOutput(log.toFile()).start();
+        Path waiting = root.resolve("rozpracováno/waiting");
+        try {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!Files.exists(waiting) && process.isAlive() && System.nanoTime() < deadline) Thread.sleep(10);
+            assertTrue(Files.exists(waiting), Files.readString(log));
+            // SIGTERM runs the same JVM shutdown hooks as Ctrl+C, without depending on shell signal handling.
+            process.destroy();
+            assertTrue(process.waitFor(5, TimeUnit.SECONDS), "Shutdown waited for owner System.exit: " + Files.readString(log));
+            assertTrue(Files.exists(root.resolve("rozpracováno/blocks/000000.json")));
+            try (var ignored = Workspace.open(Optional.of(root.resolve("rozpracováno")))) { /* lock released */ }
+        } finally {
+            process.destroyForcibly();
+            if (Files.exists(waiting)) {
+                ProcessHandle.of(Long.parseLong(Files.readString(waiting).strip()))
+                        .ifPresent(handle -> { if (handle.isAlive()) handle.destroyForcibly(); });
+            }
+        }
+    }
+
+    public static class ShutdownProbe {
+        public static void main(String[] args) throws Exception {
+            var fixture = new TranscriptionJobTest();
+            fixture.temp = Path.of(args[0]);
+            fixture.setup();
+            fixture.mode = "wait";
+            int code = new TranscriberCommand(System.out, System.err, fixture.job(), fixture.settings).execute(
+                    new String[]{fixture.input.toString(), "--work-dir", fixture.work.toString()});
+            System.exit(code);
+        }
     }
 
     @Test void resumesOnlyPendingBlocks() throws Exception {

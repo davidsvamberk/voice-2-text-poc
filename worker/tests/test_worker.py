@@ -67,6 +67,9 @@ class WorkerTest(unittest.TestCase):
                 self.assertEqual(event['blockId'], result['blockId'])
                 self.assertEqual('a'*64, result['inputSha256'])
                 self.assertEqual('b'*64, result['configSha256'])
+                self.assertEqual(1, result['schemaVersion'])
+                self.assertEqual((0, 2) if event['blockId'] == 0 else (2, 4),
+                                 (result['blockStart'], result['blockEnd']))
         self.assertEqual(0, run_request(self.request, self.factory, emit))
         self.assertEqual([], list(Path(self.request['workDir']).rglob('*.tmp')))
 
@@ -132,7 +135,7 @@ class WorkerTest(unittest.TestCase):
         with patch.dict(sys.modules, {'faster_whisper': NS(WhisperModel=Model)}), \
              patch('transcriber_worker.engine.read_block', return_value='samples'):
             self.assertEqual(0, run_request(self.request, Engine, self.events.append))
-            self.assertEqual(['ready', 'progress', 'block_done'], [e['type'] for e in self.events])
+            self.assertEqual(['ready', 'block_done'], [e['type'] for e in self.events])
             path = Path(self.request['workDir']) / 'blocks/000000.json'
             saved = json.loads(path.read_text())['segments'][0]
             self.assertEqual(dict(start=0.25, end=1.75, text='česky',
@@ -154,6 +157,63 @@ class WorkerTest(unittest.TestCase):
                             self.assertEqual(['ready', 'error'], [e['type'] for e in self.events])
                             self.assertFalse(path.exists())
                     setattr(target, field, original)
+
+    def run_model_segments(self, segments):
+        owner = self
+        class Model:
+            def __init__(self, *args, **kwargs): pass
+            def transcribe(self, audio, **kwargs):
+                owner.calls.append('inference')
+                return iter(segments), None
+        self.request['pendingBlockIds'] = [1]
+        with patch.dict(sys.modules, {'faster_whisper': NS(WhisperModel=Model)}), \
+             patch('transcriber_worker.engine.read_block', return_value='samples'):
+            return run_request(self.request, Engine, self.events.append)
+
+    def test_small_model_timestamp_errors_checkpoint_without_losing_text(self):
+        segments = [NS(start=-0.05, end=1.0, text=' První ', words=[
+                        NS(start=-0.02, end=0.5, word=' První'),
+                        NS(start=0.48, end=0.47, word=' slovo ')]),
+                    NS(start=0.98, end=2.05, text='druhý', words=[
+                        NS(start=1.5, end=2.02, word='druhý')]),
+                    NS(start=1.99, end=1.98, text='!', words=[])]
+        with self.assertLogs('transcriber_worker.engine', level='WARNING') as logs:
+            self.assertEqual(0, self.run_model_segments(segments))
+        self.assertEqual(1, len(logs.records))
+        self.assertEqual(['inference'], self.calls)
+        self.assertEqual(['ready', 'block_done'], [e['type'] for e in self.events])
+        saved = json.loads((Path(self.request['workDir']) / 'blocks/000001.json').read_text())
+        self.assertEqual((2, 4), (saved['blockStart'], saved['blockEnd']))
+        self.assertEqual([
+            dict(start=0.0, end=1.0, text=' První ', words=[
+                dict(start=0.0, end=0.5, text=' První'),
+                dict(start=0.5, end=0.5, text=' slovo ')]),
+            dict(start=1.0, end=2.0, text='druhý', words=[
+                dict(start=1.5, end=2.0, text='druhý')]),
+            dict(start=2.0, end=2.0, text='!', words=[])], saved['segments'])
+
+    def test_gross_model_timestamp_errors_never_checkpoint_or_retry(self):
+        # Apply the same invalid intervals to segments and to words.
+        intervals = [[(-0.051, 1)], [(0, 2.051)], [(1, 0.9)],
+                     [(0, 1), (0.9, 1.5)], [(1, 1.5), (0, 0.5)],
+                     [(0, 1), (0.96, 0.96), (0.92, 0.92)],
+                     [(float('nan'), 1)], [(0, float('inf'))],
+                     [(float('-inf'), 1)]]
+        for words in (False, True):
+            for spans in intervals:
+                with self.subTest(words=words, spans=spans):
+                    self.calls.clear()
+                    self.events.clear()
+                    if words:
+                        segments = [NS(start=0, end=2, text='text', words=[
+                            NS(start=start, end=end, word=' slovo') for start, end in spans])]
+                    else:
+                        segments = [NS(start=start, end=end, text='text', words=[])
+                                    for start, end in spans]
+                    self.assertEqual(1, self.run_model_segments(segments))
+                    self.assertEqual(['inference'], self.calls)
+                    self.assertEqual(['ready', 'error'], [e['type'] for e in self.events])
+                    self.assertFalse((Path(self.request['workDir']) / 'blocks/000001.json').exists())
 
     def test_rejects_coercions_unknown_versions_and_duplicate_ids(self):
         for path, value in [('schemaVersion',True), ('schemaVersion',2), ('pendingBlockIds',[0,0]),

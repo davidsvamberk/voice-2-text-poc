@@ -1,6 +1,6 @@
 # Lokální přepis českých přednášek
 
-Java CLI připraví audio přes FFmpeg, spustí jeden lokální Python ASR worker a bezpečně ukládá výsledky jednotlivých bloků. Dokončené bloky při obnově znovu nerozpoznává. Samotný přepis ani sestavení výstupů nic nestahují.
+Java CLI připraví audio přes FFmpeg, spustí jeden lokální Python ASR worker a průběžně ukládá výsledky jednotlivých bloků. Dokončené bloky při obnově znovu nerozpoznává. Samotný přepis ani sestavení výstupů nic nestahují.
 
 ## Prostředí a build
 
@@ -90,6 +90,8 @@ Bez `--work-dir` vznikne systémový dočasný adresář; jeho absolutní cestu 
 
 Pevná konfigurace: první audio stream, mono PCM s16le 16 kHz, WAV/RF64 podle velikosti, bez odšumování; orientačně 600s bloky, hledání pauz ±30 s (`silencedetect` −35 dB, 0,5 s), překryv 2 s. ASR: `cuda`, `float16`, `language=cs`, `task=transcribe`, `beam_size=5`, `temperature=0.0`, `condition_on_previous_text=true`, `vad_filter=false`, `word_timestamps=true`, bez initial promptu. Konfigurace a verze inference knihoven tvoří identitu úlohy.
 
+Při převodu výsledku modelu worker srovná malé odchylky časů do rozsahu bloku a vzestupného pořadí. Každý čas smí posunout nejvýše o 0,05 s; text ani pořadí slov nemění a úpravu zaznamená do logu. Větší chyby a nekonečné/NaN hodnoty odmítá. Validace uložených checkpointů zůstává striktní.
+
 Časy přepisu odpovídají přehrávání originálu: nula je začátek kontejneru (`format.start_time`), nikoli první audio vzorek ani absolutní čas uložených PTS. Příprava použije `-copyts -start_at_zero` a `aresample=16000:async=1:first_pts=0:min_comp=0:min_hard_comp=0`. Pozdější začátek audia i mezery mezi audio rámci vyplní tichem, záporné vzorky před počátkem ořízne. `async=1` dovoluje pouze doplnění/ořez, bez změny rychlosti řeči; nulové prahy zachovají i krátké mezery. Viz [FFmpeg časové volby](https://ffmpeg.org/ffmpeg.html#Advanced-options) a [resampler](https://ffmpeg.org/ffmpeg-resampler.html#Resampler-Options). Vazba vychází z časových značek vstupu; ztracené nebo chybné značky nedokáže obnovit.
 
 Tyto volby jsou součástí hashe konfigurace. Workspace vytvořený starší přípravou, která mezery zkracovala, se odmítne i při dokončených blocích; pro novou přípravu použijte nový prázdný workspace.
@@ -102,14 +104,18 @@ java -jar target/transcriber.jar "/data/přednáška 1.mp3" --work-dir "/absolut
 
 Stejný příkaz slouží i k obnově, bez potvrzování. Java zamkne workspace, ověří hash vstupu, modelu a účinné konfigurace a přijme pouze validní checkpointy. Neznámá verze schématu či poškozený manifest je chyba; neúplné/poškozené výsledky bloků zůstávají pending. Před novým rozpoznáváním probe ověří shodu aktuálních verzí knihoven s původním manifestem, který se při obnově nepřepisuje. Při nesouladu obnovte původní prostředí nebo zvolte nový prázdný workspace.
 
+Výsledek každého bloku obsahuje také `blockStart` a `blockEnd`, které musejí přesně odpovídat uloženému plánu. Přegenerování plánu tak nemůže přiřadit starému textu jiný časový posun. Starší checkpointy bez těchto hranic se nepovažují za dokončené a příslušné bloky se zpracují znovu.
+
 Pokud jsou všechny bloky hotové, CLI jen znovu sestaví TXT/JSON bez Pythonu, GPU a FFmpeg, i když připravené audio chybí. Originál a totožný lokální model jsou stále potřebné pro ověření identity. Pokud bloky chybějí a WAV je poškozený, chybí nebo nesouhlasí formát/délka, vznikne z originálu nové audio při zachování platného plánu a hotových bloků. Hotové bloky se znovu nezpracují; rozpracovaný blok může být po pádu zopakován.
 
-Při Ctrl+C/interruptu se ukončí řízené procesy, zachovají checkpointy a uvolní lock až po pokusu o zastavení procesů. Ukončování potomků je best effort podle možností Java ProcessHandle. Kódy: 0 úspěch/help, 2 chyba argumentů, 1 provozní chyba, 130 přerušení. Před úspěchem se znovu ověří hash vstupu/modelu. Při neshodě se atomicky uloží `invalidated.json`; tento workspace už nelze obnovit ani po vrácení původního vstupu/modelu. Výsledky zůstanou zachované pro kontrolu, pro další přepis použijte nový workspace. Pokud selže úvodní probe ještě před vznikem manifestu, diagnostika zůstane zachovaná; po opravě prostředí použijte nový prázdný workspace. Nesouvisející neprázdné adresáře se odmítají.
+Při Ctrl+C/interruptu se ukončí řízené procesy, zachovají checkpointy a uvolní lock až po pokusu o zastavení procesů. Ukončování potomků je best effort podle možností Java ProcessHandle. Kódy: 0 úspěch/help, 2 chyba argumentů, 1 provozní chyba, 130 přerušení. Před úspěchem se znovu ověří hash vstupu/modelu. Při neshodě se atomicky uloží `invalidated.json`; tento workspace už nelze obnovit ani po vrácení původního vstupu/modelu. Výsledky zůstanou zachované pro kontrolu, pro další přepis použijte nový workspace. Pokud selže úvodní probe ještě před vznikem manifestu, po opravě prostředí lze použít stejný workspace obsahující pouze vlastní `logs/java.log` a `logs/probe.log`. Nesouvisející neprázdné adresáře se odmítají.
 
 ## Výstupy a omezení
 
 Workspace obsahuje `.lock`, `manifest.json`, `request.json`, `audio.wav`, `plan.json`, `blocks/000000.json` atd., `logs/java.log`, `logs/worker.log` a diagnostiku FFmpeg/probe. JSON mají `schemaVersion: 1`, kódování UTF-8 a konečné časy v sekundách. Soubory `.tmp` nejsou hotové výsledky. Checkpointy i výstupy se publikují atomickým přejmenováním; filesystem musí atomický přesun podporovat.
 
-`transcript.txt` obsahuje rozpoznaný text; při prázdném rozpoznání je prázdný. `transcript.json` uchovává identitu vstupu, konfiguraci, globální časové intervaly, vazbu na bloky a varování `AMBIGUOUS_OVERLAP`. Při nejednoznačném překryvu se potenciálně odlišná řeč zachová. Časové značky nejsou slibem přesného zarovnání slov. Pokud zápis druhého výstupu selže, úloha není úspěšná; opakované spuštění oba výstupy obnoví z checkpointů.
+Atomický zápis chrání před neúplným checkpointem při přerušení procesu. Bez synchronizace adresáře nezaručuje zachování posledního přejmenování při výpadku napájení; ztracený checkpoint může vyžadovat zopakování bloku.
+
+`transcript.txt` obsahuje rozpoznaný text; při prázdném rozpoznání je prázdný. `transcript.json` uchovává identitu vstupu, konfiguraci, globální časové intervaly, vazbu na bloky a varování `AMBIGUOUS_OVERLAP`. Při nejednoznačném překryvu se potenciálně odlišná řeč zachová a počet takových míst se vypíše na konzoli s odkazem na JSON. Do TXT se nevkládají dodatečné značky. Časové značky nejsou slibem přesného zarovnání slov. Pokud zápis druhého výstupu selže, úloha není úspěšná; opakované spuštění oba výstupy obnoví z checkpointů.
 
 Neprobíhají LLM opravy, shrnutí, diarizace ani další kvalitativní průchod. Ticho, šum a překrývající se hlasy mohou vést k halucinacím nebo věrohodnému chybnému textu. Kvalita na reálných nahrávkách nebyla měřena, GPU inference ani výkon nebyly benchmarkovány.

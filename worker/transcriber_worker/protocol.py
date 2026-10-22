@@ -121,8 +121,8 @@ def run_request(request: dict, engine_factory, emit) -> int:
             segments = engine.transcribe(root / 'audio.wav', block)
             validate_segments(segments, block['end'] - block['start'])
             atomic_json(root / 'blocks' / f'{ident:06d}.json', dict(schemaVersion=1,
-                inputSha256=request['inputSha256'], configSha256=request['configSha256'], blockId=ident, segments=segments))
-            event('progress', blockId=ident, secondsProcessed=block['end'] - block['start'])
+                inputSha256=request['inputSha256'], configSha256=request['configSha256'], blockId=ident,
+                blockStart=block['start'], blockEnd=block['end'], segments=segments))
             event('block_done', blockId=ident)
         return 0
     except Exception as exc:

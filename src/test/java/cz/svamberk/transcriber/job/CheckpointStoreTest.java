@@ -59,7 +59,37 @@ class CheckpointStoreTest {
     }
 
     BlockResult result(List<Segment> segments) {
-        return new BlockResult(1, manifest.inputSha256(), manifest.configSha256(), 0, segments);
+        return new BlockResult(1, manifest.inputSha256(), manifest.configSha256(), 0, block.start(), block.end(), segments);
+    }
+
+    @Test
+    void rejectsCompletedResultWhenReplannedBlockHasDifferentOffset() throws Exception {
+        try (var workspace = workspace()) {
+            var store = store(workspace);
+            audio(workspace);
+            store.savePlan(new BlockPlan(1, 20, List.of(new Block(0, 0, 11), new Block(1, 9, 20))));
+            store.saveBlock(new BlockResult(1, manifest.inputSha256(), manifest.configSha256(), 1, 9, 20,
+                    List.of(new Segment(0, 1, "original interval", List.of()))));
+            var shifted = new Block(1, 10, 20);
+            store.savePlan(new BlockPlan(1, 20, List.of(new Block(0, 0, 12), shifted)));
+            assertTrue(store.loadSavedBlock(shifted, manifest).isEmpty());
+        }
+    }
+
+    @Test
+    void refusesLegacyResultWithoutBlockInterval() throws Exception {
+        try (var workspace = workspace()) {
+            var store = store(workspace);
+            audio(workspace);
+            store.savePlan(plan);
+            store.saveBlock(result(List.of()));
+            Path path = workspace.path().resolve("blocks/000000.json");
+            var json = (tools.jackson.databind.node.ObjectNode) mapper.readTree(Files.readString(path));
+            json.remove("blockStart");
+            json.remove("blockEnd");
+            Files.writeString(path, mapper.writeValueAsString(json));
+            assertTrue(store.loadSavedBlock(block, manifest).isEmpty());
+        }
     }
 
     @Test
@@ -262,9 +292,9 @@ class CheckpointStoreTest {
             store.savePlan(plan);
             var valid = new Segment(0, 10, "text", List.of());
             var invalid = List.of(
-                    new BlockResult(1, "wrong", manifest.configSha256(), 0, List.of()),
-                    new BlockResult(1, manifest.inputSha256(), "wrong", 0, List.of()),
-                    new BlockResult(1, manifest.inputSha256(), manifest.configSha256(), 1, List.of()),
+                    new BlockResult(1, "wrong", manifest.configSha256(), 0, 0, 10, List.of()),
+                    new BlockResult(1, manifest.inputSha256(), "wrong", 0, 0, 10, List.of()),
+                    new BlockResult(1, manifest.inputSha256(), manifest.configSha256(), 1, 0, 10, List.of()),
                     result(null), result(java.util.Arrays.asList((Segment) null)),
                     result(List.of(new Segment(-1, 1, "", List.of()))),
                     result(List.of(new Segment(2, 1, "", List.of()))),

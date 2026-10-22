@@ -1,5 +1,6 @@
 """Lazy ASR imports keep protocol tests independent of inference packages."""
 import importlib.metadata
+import logging
 import math
 import os
 from pathlib import Path
@@ -98,6 +99,36 @@ class Engine:
             temperature=0.0, condition_on_previous_text=True, vad_filter=False,
             word_timestamps=True, initial_prompt=None)
         # Fully consume the lazy generator before committing a result or emitting done.
-        return [dict(start=float(s.start), end=float(s.end), text=s.text,
+        result = [dict(start=float(s.start), end=float(s.end), text=s.text,
                      words=[dict(start=float(w.start), end=float(w.end), text=w.word) for w in (s.words or [])])
                 for s in segments]
+        length = block['end'] - block['start']
+        tolerance = 0.05
+        adjusted = False
+
+        def normalize(items):
+            nonlocal adjusted
+            previous = 0.0
+            for item in items:
+                start, end = item['start'], item['end']
+                if not math.isfinite(start) or not math.isfinite(end):
+                    raise ValueError('Nonfinite model timestamp')
+                # Never sort or drop output. Each endpoint may move only slightly,
+                # including corrections accumulated from preceding intervals.
+                if start - end > tolerance + 1e-12:
+                    raise ValueError('Inverted model timestamps exceed tolerance')
+                new_start = max(previous, min(length, max(0.0, start)))
+                new_end = max(new_start, min(length, max(0.0, end)))
+                if max(abs(new_start - start), abs(new_end - end)) > tolerance + 1e-12:
+                    raise ValueError('Model timestamp correction exceeds tolerance')
+                if new_start != start or new_end != end:
+                    item['start'], item['end'] = new_start, new_end
+                    adjusted = True
+                previous = new_end
+
+        normalize(result)
+        for segment in result:
+            normalize(segment['words'])
+        if adjusted:
+            logging.getLogger(__name__).warning('Adjusted model timestamps within 0.05s tolerance')
+        return result

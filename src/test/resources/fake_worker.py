@@ -32,7 +32,9 @@ if mode.startswith('event:'):
 if mode != 'missing':
     p = Path(r['workDir']) / 'blocks' / '000000.json'
     p.parent.mkdir(exist_ok=True)
-    result = dict(schemaVersion=1,inputSha256=r['inputSha256'],configSha256=r['configSha256'],blockId=0,segments=[])
+    block = r['plan']['blocks'][0]
+    result = dict(schemaVersion=1,inputSha256=r['inputSha256'],configSha256=r['configSha256'],blockId=0,
+                  blockStart=block['start'],blockEnd=block['end'],segments=[])
     if mode == 'invalid': result['inputSha256']='wrong'
     p.write_text(json.dumps(result))
 emit(type='block_done',blockId=0)

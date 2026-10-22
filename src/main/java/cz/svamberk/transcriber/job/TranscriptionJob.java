@@ -14,6 +14,8 @@ import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /** One CLI job; the checkpoint files, rather than worker events, determine completion. */
 public final class TranscriptionJob {
@@ -35,6 +37,7 @@ public final class TranscriptionJob {
         if (!Files.isRegularFile(input) || !Files.isReadable(input)) throw new IOException("Input is not a readable file: " + input);
         Path model = settings.modelDir().toAbsolutePath().normalize();
         if (args.workDir().isPresent()) checkLocation(input, model, canonical(args.workDir().get()));
+        var finished = new CountDownLatch(1);
         try (var workspace = Workspace.open(args.workDir())) {
             workDirectory = workspace.path();
             System.out.println("Workspace: " + workDirectory);
@@ -49,7 +52,9 @@ public final class TranscriptionJob {
                 Thread hook = Thread.ofPlatform().name("transcriber-shutdown").unstarted(() -> {
                     owner.interrupt();
                     supervisor.close();
-                    try { owner.join(10000); }
+                    // Wait for resource cleanup, not thread termination: owner may call System.exit
+                    // while the JVM is already waiting for this hook to finish.
+                    try { finished.await(10, TimeUnit.SECONDS); }
                     catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                     System.err.println("Interrupted. Workspace: " + workDirectory);
                     System.err.println("Resume with INPUT --work-dir " + workDirectory);
@@ -73,7 +78,9 @@ public final class TranscriptionJob {
                         checkInterrupted();
                         var audio = new AudioPreparer(runner, settings.ffmpeg().toString(), settings.ffprobe().toString())
                                 .prepare(input, workspace);
-                        plan = new BlockPlanner().plan(audio.duration(), audio.silences());
+                        var config = manifest.config();
+                        plan = new BlockPlanner(config.targetSeconds(), config.searchSeconds(), config.overlapSeconds())
+                                .plan(audio.duration(), audio.silences());
                         if (!PreparedWav.matches(audio.path(), plan.duration())) throw new IOException("Invalid prepared WAV");
                         store.savePlan(plan);
                     } else plan = savedPlan.get();
@@ -109,6 +116,10 @@ public final class TranscriptionJob {
                     checkInterrupted();
                     var transcript = new TranscriptAssembler().assemble(manifest, plan, results);
                     new TranscriptWriter(mapper).write(workspace, transcript);
+                    if (!transcript.warnings().isEmpty()) {
+                        System.err.println("Ambiguous overlaps: " + transcript.warnings().size() + "; see transcript.json");
+                        LOG.warn("Preserved {} ambiguous overlaps; see transcript.json", transcript.warnings().size());
+                    }
                     checkInterrupted();
                     var after = JobIdentity.identify(input, manifest.config());
                     if (!after.inputSha256().equals(manifest.inputSha256()) || !after.configSha256().equals(manifest.configSha256())) {
@@ -131,6 +142,8 @@ public final class TranscriptionJob {
                     catch (IllegalStateException ignored) { /* shutdown is already running */ }
                 }
             }
+        } finally {
+            finished.countDown();
         }
     }
 
@@ -142,7 +155,9 @@ public final class TranscriptionJob {
     }
 
     private static JobConfig config(Path model, Map<String,String> versions) {
-        return new JobConfig(model, "", "cuda", "float16", "cs", 5, 0.0, true, false, true, 600, 30, 2, versions);
+        return new JobConfig(model, "", "cuda", "float16", "cs", 5, 0.0, true, false, true,
+                BlockPlanner.DEFAULT_TARGET_SECONDS, BlockPlanner.DEFAULT_SEARCH_SECONDS,
+                BlockPlanner.DEFAULT_OVERLAP_SECONDS, versions);
     }
 
     private static void checkInterrupted() throws InterruptedException {

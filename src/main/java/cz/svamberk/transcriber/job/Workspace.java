@@ -7,6 +7,7 @@ import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -46,8 +47,9 @@ public final class Workspace implements AutoCloseable {
             if (lock == null) throw new IOException("Workspace is already locked: " + path);
             // Check only after locking; the lock file itself is not foreign content.
             try (var entries = Files.list(path)) {
-                boolean nonempty = entries.anyMatch(p -> !p.getFileName().toString().equals(".lock"));
-                if (nonempty && !Files.isRegularFile(path.resolve("manifest.json"), NOFOLLOW_LINKS)) {
+                var content = entries.filter(p -> !p.getFileName().toString().equals(".lock")).toList();
+                if (!content.isEmpty() && !Files.isRegularFile(path.resolve("manifest.json"), NOFOLLOW_LINKS)
+                        && !onlyPreflightLogs(content)) {
                     throw new IOException("Unrelated nonempty workspace: " + path);
                 }
             }
@@ -62,6 +64,16 @@ public final class Workspace implements AutoCloseable {
     }
 
     public Path path() { return path; }
+
+    private static boolean onlyPreflightLogs(List<Path> content) throws IOException {
+        if (content.size() != 1) return false;
+        Path logs = content.getFirst();
+        if (!logs.getFileName().toString().equals("logs") || !Files.isDirectory(logs, NOFOLLOW_LINKS)) return false;
+        try (var entries = Files.list(logs)) {
+            return entries.allMatch(p -> Files.isRegularFile(p, NOFOLLOW_LINKS)
+                    && Set.of("java.log", "probe.log").contains(p.getFileName().toString()));
+        }
+    }
 
     @Override
     public synchronized void close() throws IOException {

@@ -77,7 +77,8 @@ class WorkerClientTest {
     }
     @Test void probeUsesSystemPythonWithoutModelLoad() throws Exception {
         mode("valid");
-        assertEquals(Map.of("fake","1"),new WorkerClient(settings,new ProcessRunner(),null,mapper).probe(settings));
+        assertEquals(Map.of("fake","1"),new WorkerClient(settings,new ProcessRunner(),null,mapper)
+                .probe(settings, temp.resolve("probe.log")));
     }
     @Test void cancellationTerminatesWorker() throws Exception {
         mode("wait");

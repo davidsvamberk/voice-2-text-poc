@@ -36,7 +36,7 @@ public final class AudioPreparer {
         Path temporary = ws.path().resolve("audio.wav.tmp");
         Path audio = ws.path().resolve("audio.wav");
         // WAV sample zero is the input format's playback start, not the first audio frame.
-        checked(List.of(ffmpeg, "-nostdin", "-y", "-copyts", "-start_at_zero", "-i", input.toString(), "-map", "0:a:0", "-vn",
+        checked(List.of(ffmpeg, "-nostdin", "-nostats", "-y", "-copyts", "-start_at_zero", "-i", input.toString(), "-map", "0:a:0", "-vn",
                 "-ac", "1", "-ar", "16000", "-af", TIMELINE_FILTER, "-c:a", "pcm_s16le", "-rf64", "auto", "-f", "wav",
                 temporary.toString()), logs.resolve("prepare.log"));
         if (!Files.isRegularFile(temporary) || Files.size(temporary) == 0) {
@@ -53,7 +53,7 @@ public final class AudioPreparer {
         }
         if (!Double.isFinite(duration) || duration <= 0) throw new IOException("Audio duration must be finite and positive");
         Path silenceLog = logs.resolve("silence.log");
-        checked(List.of(ffmpeg, "-nostdin", "-i", audio.toString(), "-af", "silencedetect=noise=-35dB:d=0.5",
+        checked(List.of(ffmpeg, "-nostdin", "-nostats", "-i", audio.toString(), "-af", "silencedetect=noise=-35dB:d=0.5",
                 "-f", "null", "-"), silenceLog);
         return new PreparedAudio(audio, duration, readSilences(silenceLog, duration));
     }

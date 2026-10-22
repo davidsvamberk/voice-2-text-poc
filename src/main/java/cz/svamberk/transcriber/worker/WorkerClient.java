@@ -12,7 +12,6 @@ import tools.jackson.databind.node.ObjectNode;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
@@ -35,10 +34,6 @@ public final class WorkerClient {
         this.store = store;
         this.mapper = mapper.rebuild().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
         this.files = new AtomicJsonFiles(mapper);
-    }
-
-    public Map<String,String> probe(RuntimeSettings runtime) throws IOException, InterruptedException {
-        return probe(runtime, Files.createTempFile("transcriber-probe-", ".log"));
     }
 
     public Map<String,String> probe(RuntimeSettings runtime, Path log) throws IOException, InterruptedException {

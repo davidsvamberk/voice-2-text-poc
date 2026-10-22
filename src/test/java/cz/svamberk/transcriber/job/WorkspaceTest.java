@@ -42,6 +42,19 @@ class WorkspaceTest {
     }
 
     @Test
+    void reopensPreflightLogsButRejectsUnrelatedLogFiles() throws Exception {
+        Path logs = Files.createDirectory(temp.resolve("logs"));
+        Files.writeString(logs.resolve("java.log"), "first attempt");
+        Files.writeString(logs.resolve("probe.log"), "missing CUDA");
+        try (var workspace = Workspace.open(Optional.of(temp))) {
+            assertEquals(temp.toRealPath(), workspace.path());
+        }
+        Files.writeString(logs.resolve("unrelated.txt"), "do not overwrite");
+        assertThrows(IOException.class, () -> Workspace.open(Optional.of(temp)));
+        assertEquals("do not overwrite", Files.readString(logs.resolve("unrelated.txt")));
+    }
+
+    @Test
     void rejectsConcurrentOpen() throws Exception {
         Path path = temp.resolve("práce s mezerou");
         Files.createDirectories(path);

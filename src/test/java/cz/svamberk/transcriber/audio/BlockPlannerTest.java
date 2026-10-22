@@ -8,6 +8,14 @@ import static org.junit.jupiter.api.Assertions.*;
 class BlockPlannerTest {
     private final BlockPlanner planner = new BlockPlanner();
 
+    @Test void usesConfiguredTargetSearchAndOverlap() {
+        var configured = new BlockPlanner(10, 1, 4);
+        assertEquals(List.of(new Block(0, 0, 12), new Block(1, 8, 22), new Block(2, 18, 23)),
+                configured.plan(23, List.of(new SilenceInterval(11.5, 12.5))).blocks());
+        assertEquals(List.of(new Block(0, 0, 11.5), new Block(1, 7.5, 21.5), new Block(2, 17.5, 23)),
+                configured.plan(23, List.of(new SilenceInterval(9, 10))).blocks());
+    }
+
     @Test void plansShortAudio() {
         var plan = planner.plan(12, List.of());
         assertEquals(1, plan.schemaVersion());

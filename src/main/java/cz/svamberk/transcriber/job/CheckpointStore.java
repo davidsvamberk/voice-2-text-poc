@@ -201,6 +201,8 @@ public final class CheckpointStore {
         schema(result.schemaVersion());
         require(result.blockId() == block.id() && Objects.equals(result.inputSha256(), manifest.inputSha256())
                 && Objects.equals(result.configSha256(), manifest.configSha256()), "Block identity mismatch");
+        require(result.blockStart() == block.start() && result.blockEnd() == block.end(),
+                "Block interval changed");
         require(result.segments() != null, "Missing segments");
         double length = block.end() - block.start();
         double previousEnd = 0;
