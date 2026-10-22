@@ -98,7 +98,7 @@ Stejný příkaz slouží i k obnově, bez potvrzování. Java zamkne workspace,
 
 Pokud jsou všechny bloky hotové, CLI jen znovu sestaví TXT/JSON bez Pythonu, GPU a FFmpeg, i když připravené audio chybí. Originál a totožný lokální model jsou stále potřebné pro ověření identity. Pokud bloky chybějí a WAV je poškozený, chybí nebo nesouhlasí formát/délka, vznikne z originálu nové audio při zachování platného plánu a hotových bloků. Hotové bloky se znovu nezpracují; rozpracovaný blok může být po pádu zopakován.
 
-Při Ctrl+C/interruptu se ukončí řízené procesy, zachovají checkpointy a uvolní lock až po pokusu o zastavení procesů. Ukončování potomků je best effort podle možností Java ProcessHandle. Kódy: 0 úspěch/help, 2 chyba argumentů, 1 provozní chyba, 130 přerušení. Před úspěchem se znovu ověří hash vstupu/modelu. Pokud selže úvodní probe ještě před vznikem manifestu, diagnostika zůstane zachovaná; po opravě prostředí použijte nový prázdný workspace. Nesouvisející neprázdné adresáře se odmítají.
+Při Ctrl+C/interruptu se ukončí řízené procesy, zachovají checkpointy a uvolní lock až po pokusu o zastavení procesů. Ukončování potomků je best effort podle možností Java ProcessHandle. Kódy: 0 úspěch/help, 2 chyba argumentů, 1 provozní chyba, 130 přerušení. Před úspěchem se znovu ověří hash vstupu/modelu. Při neshodě se atomicky uloží `invalidated.json`; tento workspace už nelze obnovit ani po vrácení původního vstupu/modelu. Výsledky zůstanou zachované pro kontrolu, pro další přepis použijte nový workspace. Pokud selže úvodní probe ještě před vznikem manifestu, diagnostika zůstane zachovaná; po opravě prostředí použijte nový prázdný workspace. Nesouvisející neprázdné adresáře se odmítají.
 
 ## Výstupy a omezení
 

@@ -3,6 +3,7 @@ package cz.svamberk.transcriber.job;
 import cz.svamberk.transcriber.audio.*;
 import cz.svamberk.transcriber.cli.CliArguments;
 import cz.svamberk.transcriber.config.RuntimeSettings;
+import cz.svamberk.transcriber.io.AtomicJsonFiles;
 import cz.svamberk.transcriber.output.*;
 import cz.svamberk.transcriber.process.ProcessRunner;
 import cz.svamberk.transcriber.worker.*;
@@ -38,6 +39,10 @@ public final class TranscriptionJob {
             workDirectory = workspace.path();
             System.out.println("Workspace: " + workDirectory);
             checkLocation(input, model, workDirectory);
+            Path invalidation = workDirectory.resolve("invalidated.json");
+            if (Files.exists(invalidation, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("Workspace invalidated after input/model change; use a new workspace");
+            }
             protectFiles(workDirectory, input);
             try (var log = new WorkspaceLog(workDirectory); var supervisor = runner.supervisor()) {
                 Thread owner = Thread.currentThread();
@@ -107,6 +112,8 @@ public final class TranscriptionJob {
                     checkInterrupted();
                     var after = JobIdentity.identify(input, manifest.config());
                     if (!after.inputSha256().equals(manifest.inputSha256()) || !after.configSha256().equals(manifest.configSha256())) {
+                        new AtomicJsonFiles(mapper).write(invalidation,
+                                Map.of("schemaVersion", 1, "reason", "INPUT_OR_MODEL_CHANGED"));
                         throw new IOException("Input/model changed during job; use a new workspace");
                     }
                     checkInterrupted();

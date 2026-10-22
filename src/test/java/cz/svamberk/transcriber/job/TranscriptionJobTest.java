@@ -5,6 +5,8 @@ import cz.svamberk.transcriber.config.RuntimeSettings;
 import cz.svamberk.transcriber.process.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.*;
@@ -221,14 +223,31 @@ class TranscriptionJobTest {
         assertEquals("original lecture", Files.readString(input));
     }
 
-    @Test void refusesSuccessWhenInputOrModelChangesDuringRun() throws Exception {
-        mode = "mutate";
-        assertThrows(IOException.class, this::run);
-        assertTrue(Files.exists(block0()));
+    @ParameterizedTest
+    @ValueSource(strings = {"mutate", "mutate-model"})
+    void rejectsResumeAfterDetectedMutationEvenWhenOriginalIsRestored(String mutation) throws Exception {
+        mode = mutation;
+        var failure = assertThrows(IOException.class, this::run);
+        assertTrue(failure.getMessage().contains("use a new workspace"));
+        var artifacts = new LinkedHashMap<Path, byte[]>();
+        for (String name : List.of("manifest.json", "plan.json", "blocks/000000.json",
+                "blocks/000001.json", "transcript.txt", "transcript.json")) {
+            var path = work.resolve(name);
+            artifacts.put(path, Files.readAllBytes(path));
+        }
         Files.writeString(input, "original lecture");
-        Files.delete(work.resolve("blocks/000001.json"));
-        mode = "mutate-model";
-        assertThrows(IOException.class, this::run);
+        Files.writeString(model.resolve("model.bin"), "weights");
+        mode = "valid";
+        forbidProcesses = true;
+        var resumeFailure = assertThrows(IOException.class, this::run);
+        assertTrue(resumeFailure.getMessage().contains("invalidated"));
+        assertTrue(resumeFailure.getMessage().contains("use a new workspace"));
+        var marker = mapper.readTree(Files.readString(work.resolve("invalidated.json")));
+        assertEquals(1, marker.get("schemaVersion").asInt());
+        assertEquals("INPUT_OR_MODEL_CHANGED", marker.get("reason").asString());
+        for (var artifact : artifacts.entrySet()) {
+            assertArrayEquals(artifact.getValue(), Files.readAllBytes(artifact.getKey()));
+        }
     }
 
     @Test void corruptStoredManifestFailsBeforeProbe() throws Exception {
