@@ -48,12 +48,16 @@ def validate_request(r):
     require(c.get('modelDir') == r['modelDir'], 'Model path mismatch')
     require(type(c.get('modelSha256')) is str and re.fullmatch('[0-9a-f]{64}', c['modelSha256']), 'Invalid model identity')
     for key, expected in dict(device='cuda',computeType='float16',language='cs',beamSize=5,
-                              conditionOnPreviousText=True,vadFilter=False,wordTimestamps=True).items():
+                              vadFilter=False,wordTimestamps=True).items():
         require(type(c.get(key)) is type(expected) and c[key] == expected, f'Invalid ASR setting: {key}')
+    require(type(c.get('conditionOnPreviousText')) is bool, 'Invalid conditioning flag')
+    for key in ('initialPrompt', 'hotwords'):
+        require(c.get(key) is None or type(c.get(key)) is str, f'Invalid {key}')
     require(number(c.get('temperature')) and c['temperature'] == 0, 'Invalid temperature')
-    for key in ('targetSeconds','searchSeconds'):
-        require(type(c.get(key)) is int and c[key] > 0, f'Invalid {key}')
+    require(type(c.get('targetSeconds')) is int and c['targetSeconds'] > 0, 'Invalid targetSeconds')
+    require(type(c.get('searchSeconds')) is int and 0 <= c['searchSeconds'] < c['targetSeconds'], 'Invalid searchSeconds')
     require(number(c.get('overlapSeconds')) and c['overlapSeconds'] >= 0, 'Invalid overlap')
+    require(c['overlapSeconds'] / 2 < c['targetSeconds'] - c['searchSeconds'], 'Overlap too large')
     versions = c.get('engineVersions')
     require(type(versions) is dict and versions and all(type(k) is str and type(v) is str and v for k,v in versions.items()), 'Invalid versions')
     plan = r.get('plan')

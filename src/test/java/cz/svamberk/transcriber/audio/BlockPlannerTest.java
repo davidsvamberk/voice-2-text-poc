@@ -6,7 +6,12 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class BlockPlannerTest {
-    private final BlockPlanner planner = new BlockPlanner();
+    private final BlockPlanner planner = new BlockPlanner(600, 30, 2);
+
+    @Test void defaultMinuteBlocksCoverAudioWithTwoSecondOverlap() {
+        assertEquals(List.of(new Block(0, 0, 61), new Block(1, 59, 121), new Block(2, 119, 125)),
+                new BlockPlanner().plan(125, List.of()).blocks());
+    }
 
     @Test void usesConfiguredTargetSearchAndOverlap() {
         var configured = new BlockPlanner(10, 1, 4);

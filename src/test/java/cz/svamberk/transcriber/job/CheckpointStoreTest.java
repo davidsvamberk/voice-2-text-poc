@@ -63,6 +63,28 @@ class CheckpointStoreTest {
     }
 
     @Test
+    void loadsLegacyManifestWithoutOptionalHintsButStillRequiresOriginalFields() throws Exception {
+        try (var workspace = workspace()) {
+            store(workspace);
+            Path path = workspace.path().resolve("manifest.json");
+            var json = (tools.jackson.databind.node.ObjectNode) mapper.readTree(Files.readString(path));
+            var config = (tools.jackson.databind.node.ObjectNode) json.get("config");
+            config.remove("initialPrompt");
+            config.remove("hotwords");
+            Files.writeString(path, mapper.writeValueAsString(json));
+            byte[] original = Files.readAllBytes(path);
+            var resumed = new CheckpointStore(workspace, mapper);
+            assertEquals(manifest, resumed.loadManifest().orElseThrow());
+            resumed.initializeOrValidate(workspace, manifest);
+            assertArrayEquals(original, Files.readAllBytes(path));
+            config.remove("conditionOnPreviousText");
+            Files.writeString(path, mapper.writeValueAsString(json));
+            assertThrows(IOException.class, resumed::loadManifest);
+            assertThrows(IOException.class, () -> resumed.initializeOrValidate(workspace, manifest));
+        }
+    }
+
+    @Test
     void rejectsCompletedResultWhenReplannedBlockHasDifferentOffset() throws Exception {
         try (var workspace = workspace()) {
             var store = store(workspace);

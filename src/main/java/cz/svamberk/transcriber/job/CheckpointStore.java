@@ -150,6 +150,12 @@ public final class CheckpointStore {
             require(version != null && version.isIntegralNumber() && version.canConvertToInt(),
                     "Missing schema version: " + path);
             schema(version.asInt());
+            if (type == JobManifest.class && node.get("config") instanceof tools.jackson.databind.node.ObjectNode config) {
+                // Original schema-1 manifests predate these optional hints. Keep all other fields strict.
+                if (!config.has("initialPrompt")) config.putNull("initialPrompt");
+                if (!config.has("hotwords")) config.putNull("hotwords");
+                json = mapper.writeValueAsString(node);
+            }
             return mapper.readerFor(type).with(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES,
                     DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES,
                     DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readValue(json);

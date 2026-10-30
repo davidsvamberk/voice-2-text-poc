@@ -1,0 +1,16 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[requires]
+python_version = "3.12"
+
+[packages]
+nemo-toolkit = {version = "==2.4.0", extras = ["asr"]}
+torch = "==2.7.1"
+torchaudio = "==2.7.1"
+# NeMo 2.4 requires NumPy <2; PyArrow 26 requires NumPy >=2 at import time.
+pyarrow = "==21.0.0"
+
+[dev-packages]

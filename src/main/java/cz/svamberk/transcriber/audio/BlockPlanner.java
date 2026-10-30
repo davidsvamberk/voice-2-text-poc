@@ -6,8 +6,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class BlockPlanner {
-    public static final int DEFAULT_TARGET_SECONDS = 600;
-    public static final int DEFAULT_SEARCH_SECONDS = 30;
+    public static final int DEFAULT_TARGET_SECONDS = 60;
+    public static final int DEFAULT_SEARCH_SECONDS = 1;
     public static final double DEFAULT_OVERLAP_SECONDS = 2;
     private final int targetSeconds;
     private final int searchSeconds;

@@ -49,7 +49,7 @@ public class TranscriberCommand {
         }
         try {
             var directory = job.run(arguments, settings);
-            out.println("Saved transcript.txt and transcript.json in: " + directory);
+            out.println("Saved transcript.txt and transcript.jsonl in: " + directory);
             return 0;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

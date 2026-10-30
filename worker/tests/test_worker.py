@@ -116,9 +116,42 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual('česky', engine.transcribe(Path('audio.wav'), dict(start=0,end=2))[0]['text'])
         self.assertEqual([((str(self.model),),dict(device='cuda',compute_type='float16',local_files_only=True))], loaded)
         self.assertEqual([dict(language='cs', task='transcribe', beam_size=5, temperature=0.0,
-            condition_on_previous_text=True, vad_filter=False, word_timestamps=True, initial_prompt=None)], transcribed)
+            condition_on_previous_text=True, vad_filter=False, word_timestamps=True, initial_prompt=None, hotwords=None)], transcribed)
         self.assertEqual('1', os.environ['HF_HUB_OFFLINE'])
         self.assertEqual('1', os.environ['HF_HUB_DISABLE_TELEMETRY'])
+
+    def test_applies_configured_hints_and_conditioning_to_each_block(self):
+        options = []
+        class Model:
+            def __init__(self, *args, **kwargs): pass
+            def transcribe(self, audio, **kwargs):
+                options.append(kwargs)
+                return iter([]), None
+        config = {**self.request['config'], 'conditionOnPreviousText': False,
+                  'initialPrompt': 'Oborový kontext.', 'hotwords': 'pedagogická intervence'}
+        with patch.dict(sys.modules, {'faster_whisper': NS(WhisperModel=Model)}), \
+             patch('transcriber_worker.engine.read_block', return_value='samples'):
+            engine = Engine(self.model, config)
+            engine.transcribe(Path('audio.wav'), dict(start=0, end=20))
+            engine.transcribe(Path('audio.wav'), dict(start=18, end=40))
+        self.assertEqual(2, len(options))
+        for value in options:
+            self.assertFalse(value['condition_on_previous_text'])
+            self.assertEqual('Oborový kontext.', value['initial_prompt'])
+            self.assertEqual('pedagogická intervence', value['hotwords'])
+
+    def test_accepts_false_conditioning_hints_and_zero_silence_search(self):
+        self.request['config'].update(conditionOnPreviousText=False, initialPrompt=None,
+                                      hotwords='pedagogická intervence', searchSeconds=0)
+        self.assertEqual(0, run_request(self.request, self.factory, self.events.append))
+
+    def test_rejects_malformed_hints_and_incompatible_chunk_settings(self):
+        for update in [{'hotwords': 42}, {'initialPrompt': []}, {'conditionOnPreviousText': 1},
+                       {'searchSeconds': -1}, {'searchSeconds': 600}, {'overlapSeconds': 1200}]:
+            with self.subTest(update=update):
+                request = copy.deepcopy(self.request)
+                request['config'].update(update)
+                self.assertEqual(1, run_request(request, self.factory, self.events.append))
 
     def test_scalar_timestamps_commit_through_run_request(self):
         class Scalar:

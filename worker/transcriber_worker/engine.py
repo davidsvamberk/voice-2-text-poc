@@ -92,12 +92,15 @@ class Engine:
         model_dir = local_model(model_dir)
         from faster_whisper import WhisperModel
         self.model = WhisperModel(str(model_dir), device='cuda', compute_type='float16', local_files_only=True)
+        self.condition_on_previous_text = config.get('conditionOnPreviousText', True)
+        self.initial_prompt = config.get('initialPrompt')
+        self.hotwords = config.get('hotwords')
 
     def transcribe(self, audio_path: Path, block: dict) -> list[dict]:
         audio = read_block(audio_path, block)
         segments, _ = self.model.transcribe(audio, language='cs', task='transcribe', beam_size=5,
-            temperature=0.0, condition_on_previous_text=True, vad_filter=False,
-            word_timestamps=True, initial_prompt=None)
+            temperature=0.0, condition_on_previous_text=self.condition_on_previous_text, vad_filter=False,
+            word_timestamps=True, initial_prompt=self.initial_prompt, hotwords=self.hotwords)
         # Fully consume the lazy generator before committing a result or emitting done.
         result = [dict(start=float(s.start), end=float(s.end), text=s.text,
                      words=[dict(start=float(w.start), end=float(w.end), text=w.word) for w in (s.words or [])])

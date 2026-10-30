@@ -67,7 +67,7 @@ class TranscriptionJobTest {
                     emit(type='block_done', blockId=i)
                 """);
         settings = new RuntimeSettings(Path.of("missing-python"), Path.of("missing-worker"), model,
-                Path.of("fake-ffmpeg"), Path.of("fake-ffprobe"));
+                Path.of("fake-ffmpeg"), Path.of("fake-ffprobe"), 600, 30, 2.0, true, "", "");
     }
 
     class FakeRunner extends ProcessRunner {
@@ -101,6 +101,27 @@ class TranscriptionJobTest {
     CliArguments args() { return new CliArguments(input, Optional.of(work), false); }
     Path run() throws Exception { return job().run(args(), settings); }
     Path block0() { return work.resolve("blocks/000000.json"); }
+
+    @Test void configuredShortBlocksPersistHintsResumeAndRejectChangedHints() throws Exception {
+        settings = new RuntimeSettings(settings.python(), settings.workerDir(), settings.modelDir(),
+                settings.ffmpeg(), settings.ffprobe(), 20, 1, 2.0, false, "Oborový kontext.", "pedagogika");
+        run();
+        var manifest = mapper.readValue(work.resolve("manifest.json").toFile(), JobManifest.class);
+        var plan = mapper.readValue(work.resolve("plan.json").toFile(), BlockPlan.class);
+        assertEquals(20, manifest.config().targetSeconds());
+        assertFalse(manifest.config().conditionOnPreviousText());
+        assertEquals("Oborový kontext.", manifest.config().initialPrompt());
+        assertEquals("pedagogika", manifest.config().hotwords());
+        assertTrue(plan.blocks().size() > 25);
+        assertTrue(plan.blocks().stream().allMatch(b -> b.end() - b.start() <= 23));
+        var completed = Files.readAllBytes(block0());
+        forbidProcesses = true;
+        run();
+        assertArrayEquals(completed, Files.readAllBytes(block0()));
+        settings = new RuntimeSettings(settings.python(), settings.workerDir(), settings.modelDir(),
+                settings.ffmpeg(), settings.ffprobe(), 20, 1, 2.0, false, "Jiný kontext.", "pedagogika");
+        assertThrows(IOException.class, this::run);
+    }
     void incomplete() throws Exception {
         mode = "fail";
         assertThrows(IOException.class, this::run);
@@ -108,12 +129,12 @@ class TranscriptionJobTest {
         mode = "valid";
     }
 
-    @Test void runsToTxtAndJson() throws Exception {
+    @Test void runsToTxtAndJsonLines() throws Exception {
         assertEquals(work.toAbsolutePath(), run());
         assertEquals("Ahoj.\nAhoj.\n", Files.readString(work.resolve("transcript.txt")));
-        var json = mapper.readTree(Files.readString(work.resolve("transcript.json")));
-        assertEquals(2, json.get("segments").size());
-        assertEquals(599, json.get("segments").get(1).get("start").asDouble());
+        var records = Files.readAllLines(work.resolve("transcript.jsonl")).stream().map(mapper::readTree).toList();
+        assertEquals(List.of("metadata", "segment", "segment"), records.stream().map(r -> r.get("type").asString()).toList());
+        assertEquals(599, records.get(2).get("start").asDouble());
         assertEquals("original lecture", Files.readString(input));
         assertTrue(Files.size(work.resolve("logs/java.log")) > 0);
         assertEquals(1, probes);
@@ -125,7 +146,7 @@ class TranscriptionJobTest {
         var err = new ByteArrayOutputStream();
         var command = new TranscriberCommand(new PrintStream(out), new PrintStream(err), job(), settings);
         assertEquals(0, command.execute(new String[]{input.toString(), "--work-dir", work.toString()}));
-        assertTrue(out.toString().contains("Saved transcript.txt"));
+        assertTrue(out.toString().contains("Saved transcript.txt and transcript.jsonl"));
         assertEquals("", err.toString());
     }
 
@@ -201,10 +222,11 @@ class TranscriptionJobTest {
         run();
         Files.delete(work.resolve("audio.wav"));
         Files.delete(work.resolve("transcript.txt"));
-        Files.delete(work.resolve("transcript.json"));
+        Files.delete(work.resolve("transcript.jsonl"));
         forbidProcesses = true;
         run();
         assertEquals("Ahoj.\nAhoj.\n", Files.readString(work.resolve("transcript.txt")));
+        assertEquals(3, Files.readAllLines(work.resolve("transcript.jsonl")).size());
         assertEquals(1, workers);
         assertEquals(1, probes);
     }
@@ -213,7 +235,9 @@ class TranscriptionJobTest {
         mode = "empty";
         run();
         assertEquals("", Files.readString(work.resolve("transcript.txt")));
-        assertTrue(mapper.readTree(Files.readString(work.resolve("transcript.json"))).get("segments").isEmpty());
+        var records = Files.readAllLines(work.resolve("transcript.jsonl"));
+        assertEquals(1, records.size());
+        assertEquals("metadata", mapper.readTree(records.getFirst()).get("type").asString());
     }
 
     @Test void failureKeepsCompletedBlocksAndReportsDirectory() throws Exception {
@@ -305,7 +329,7 @@ class TranscriptionJobTest {
         assertTrue(failure.getMessage().contains("use a new workspace"));
         var artifacts = new LinkedHashMap<Path, byte[]>();
         for (String name : List.of("manifest.json", "plan.json", "blocks/000000.json",
-                "blocks/000001.json", "transcript.txt", "transcript.json")) {
+                "blocks/000001.json", "transcript.txt", "transcript.jsonl")) {
             var path = work.resolve(name);
             artifacts.put(path, Files.readAllBytes(path));
         }

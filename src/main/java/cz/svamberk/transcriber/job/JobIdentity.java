@@ -29,7 +29,7 @@ public final class JobIdentity {
         var effective = new JobConfig(model, modelHash(model), config.device(), config.computeType(),
                 config.language(), config.beamSize(), config.temperature(), config.conditionOnPreviousText(),
                 config.vadFilter(), config.wordTimestamps(), config.targetSeconds(), config.searchSeconds(),
-                config.overlapSeconds(), new TreeMap<>(config.engineVersions()));
+                config.overlapSeconds(), new TreeMap<>(config.engineVersions()), config.initialPrompt(), config.hotwords());
         return new JobManifest(1, hex(fileHash(input)), effective, configHash(effective));
     }
 
@@ -38,7 +38,9 @@ public final class JobIdentity {
         var fields = new TreeMap<String, Object>();
         fields.put("modelSha256", config.modelSha256());
         fields.put("task", "transcribe");
-        fields.put("initialPrompt", null);
+        fields.put("initialPrompt", config.initialPrompt());
+        // Omit absent hotwords to retain the original hash for explicit legacy configurations.
+        if (config.hotwords() != null) fields.put("hotwords", config.hotwords());
         fields.put("audioStream", "0:a:0");
         fields.put("audioCodec", "pcm_s16le");
         fields.put("audioChannels", 1);

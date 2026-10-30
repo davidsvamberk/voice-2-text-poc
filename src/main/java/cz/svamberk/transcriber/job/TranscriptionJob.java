@@ -67,7 +67,7 @@ public final class TranscriptionJob {
                     var stored = store.loadManifest();
                     Map<String,String> versions = stored.isPresent() ? stored.get().config().engineVersions()
                             : worker.probe(settings, workDirectory.resolve("logs/probe.log"));
-                    var manifest = JobIdentity.identify(input, config(model, versions));
+                    var manifest = JobIdentity.identify(input, config(model, versions, settings));
                     store.initializeOrValidate(workspace, manifest);
                     var savedPlan = store.loadSavedPlan();
                     BlockPlan plan;
@@ -117,8 +117,8 @@ public final class TranscriptionJob {
                     var transcript = new TranscriptAssembler().assemble(manifest, plan, results);
                     new TranscriptWriter(mapper).write(workspace, transcript);
                     if (!transcript.warnings().isEmpty()) {
-                        System.err.println("Ambiguous overlaps: " + transcript.warnings().size() + "; see transcript.json");
-                        LOG.warn("Preserved {} ambiguous overlaps; see transcript.json", transcript.warnings().size());
+                        System.err.println("Ambiguous overlaps: " + transcript.warnings().size() + "; see transcript.jsonl");
+                        LOG.warn("Preserved {} ambiguous overlaps; see transcript.jsonl", transcript.warnings().size());
                     }
                     checkInterrupted();
                     var after = JobIdentity.identify(input, manifest.config());
@@ -128,7 +128,7 @@ public final class TranscriptionJob {
                         throw new IOException("Input/model changed during job; use a new workspace");
                     }
                     checkInterrupted();
-                    LOG.info("Saved transcript.txt and transcript.json; input/model hashes rechecked");
+                    LOG.info("Saved transcript.txt and transcript.jsonl; input/model hashes rechecked");
                     return workDirectory;
                 } catch (IOException | RuntimeException e) {
                     LOG.error("Job failed; checkpoints preserved", e);
@@ -154,10 +154,11 @@ public final class TranscriptionJob {
         }
     }
 
-    private static JobConfig config(Path model, Map<String,String> versions) {
-        return new JobConfig(model, "", "cuda", "float16", "cs", 5, 0.0, true, false, true,
-                BlockPlanner.DEFAULT_TARGET_SECONDS, BlockPlanner.DEFAULT_SEARCH_SECONDS,
-                BlockPlanner.DEFAULT_OVERLAP_SECONDS, versions);
+    private static JobConfig config(Path model, Map<String,String> versions, RuntimeSettings settings) {
+        return new JobConfig(model, "", "cuda", "float16", "cs", 5, 0.0,
+                settings.conditionOnPreviousText(), false, true,
+                settings.targetSeconds(), settings.searchSeconds(), settings.overlapSeconds(), versions,
+                settings.initialPrompt(), settings.hotwords());
     }
 
     private static void checkInterrupted() throws InterruptedException {
